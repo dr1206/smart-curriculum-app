@@ -1,0 +1,1 @@
+# smart-curriculum-app
