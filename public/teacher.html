@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Teacher Dashboard - Attendance System</title>
+    <link rel="stylesheet" href="styles.css" />
+    
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    
+    <!-- Face-api.js for face detection -->
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>👨‍🏫 Teacher Dashboard</h1>
+        <div class="user-info">
+          <span id="userEmail"></span>
+          <button onclick="logout()" class="logout-btn">Logout</button>
+        </div>
+      </div>
+
+      <div class="session-controls">
+        <h2>Session Management</h2>
+        <div class="row">
+          <div class="col">
+            <button id="startSessionBtn" onclick="startSession()" class="primary-btn">
+              🎬 Start New Session
+            </button>
+            <button id="endSessionBtn" onclick="endSession()" class="danger-btn" disabled>
+              ⏹️ End Session
+            </button>
+          </div>
+          <div class="col">
+            <div id="sessionStatus" class="status-indicator">
+              <span class="status-dot inactive"></span>
+              <span>No Active Session</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="face-detection-section">
+        <h2>Face Detection & Attendance</h2>
+        <div class="row">
+          <div class="col">
+            <div class="camera-container">
+              <video id="video" autoplay muted playsinline></video>
+              <canvas id="canvas" style="display: none;"></canvas>
+            </div>
+            <div class="camera-controls">
+              <button id="startCameraBtn" onclick="startCamera()" class="primary-btn">
+                📹 Start Camera
+              </button>
+              <button id="stopCameraBtn" onclick="stopCamera()" class="secondary-btn" disabled>
+                ⏹️ Stop Camera
+              </button>
+            </div>
+          </div>
+          <div class="col">
+            <div class="attendance-log">
+              <h3>Recent Attendance</h3>
+              <div id="attendanceList" class="attendance-list">
+                <p class="no-data">No attendance marked yet</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="session-stats">
+        <h2>Session Statistics</h2>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <h3 id="totalStudents">0</h3>
+            <p>Total Students</p>
+          </div>
+          <div class="stat-card">
+            <h3 id="presentStudents">0</h3>
+            <p>Present Today</p>
+          </div>
+          <div class="stat-card">
+            <h3 id="attendanceRate">0%</h3>
+            <p>Attendance Rate</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="notification" class="notification hidden">
+      <span id="notificationText"></span>
+    </div>
+
+    <script>
+      // Firebase config
+      const firebaseConfig = {
+        apiKey: "AIzaSyBI9FWOhqfS6e1aHpC_guvx1r_zy14cobk",
+        authDomain: "attendance-system-a1ac4.firebaseapp.com",
+        projectId: "attendance-system-a1ac4",
+        storageBucket: "attendance-system-a1ac4.firebasestorage.app",
+        messagingSenderId: "462766302633",
+        appId: "1:462766302633:web:b45441d758dc007c4250b8",
+        measurementId: "G-2MMSHHN4CK"
+      };
+
+      // Initialize Firebase
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+      const auth = firebase.auth();
+      const db = firebase.firestore();
+
+      let currentSession = null;
+      let video = null;
+      let canvas = null;
+      let ctx = null;
+      let isDetecting = false;
+      let detectionInterval = null;
+      let modelsLoaded = false;
+
+      // Check authentication
+      auth.onAuthStateChanged(user => {
+        if (!user) {
+          location.href = "login.html";
+          return;
+        }
+        
+        const role = localStorage.getItem("role");
+        if (role !== "teacher" && role !== "admin") {
+          alert("Access denied. Teacher role required.");
+          location.href = "login.html";
+          return;
+        }
+        
+        document.getElementById("userEmail").textContent = user.email;
+        loadCurrentSession();
+        loadModels();
+      });
+
+      async function loadModels() {
+        try {
+          const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+          await Promise.all([
+            faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+            faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+            faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+          ]);
+          modelsLoaded = true;
+          showNotification("Face detection models loaded successfully", "success");
+        } catch (error) {
+          console.error("Error loading models:", error);
+          showNotification("Error loading face detection models", "error");
+        }
+      }
+
+      async function startSession() {
+        try {
+          // Generate a random session code
+          const code = Math.random().toString(36).substring(2, 8).toUpperCase();
+
+          const sessionData = {
+            teacherId: auth.currentUser.uid,
+            teacherEmail: auth.currentUser.email,
+            code: code,
+            startedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            endedAt: null,
+            status: 'active'
+          };
+
+          const docRef = await db.collection('sessions').add(sessionData);
+
+          // Also create in backend
+          const backendResponse = await fetch('http://localhost:8000/session/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: auth.currentUser.uid, code: code })
+          });
+          if (!backendResponse.ok) {
+            throw new Error('Failed to start session in backend');
+          }
+
+          currentSession = { id: docRef.id, ...sessionData };
+
+          document.getElementById("startSessionBtn").disabled = true;
+          document.getElementById("endSessionBtn").disabled = false;
+          document.getElementById("sessionStatus").innerHTML =
+            '<span class="status-dot active"></span><span>Session Active</span>';
+
+          showNotification(`Session started successfully. Code: ${code}`, "success");
+          loadAttendanceStats();
+
+          // Automatically start camera
+          await startCamera();
+        } catch (error) {
+          console.error("Error starting session:", error);
+          showNotification("Error starting session", "error");
+        }
+      }
+
+      async function endSession() {
+        if (!currentSession) return;
+
+        try {
+          await db.collection('sessions').doc(currentSession.id).update({
+            endedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            status: 'ended'
+          });
+
+          // Also end in backend
+          await fetch(`http://localhost:8000/session/end/${currentSession.code}`, {
+            method: 'POST'
+          });
+
+          currentSession = null;
+          document.getElementById("startSessionBtn").disabled = false;
+          document.getElementById("endSessionBtn").disabled = true;
+          document.getElementById("sessionStatus").innerHTML =
+            '<span class="status-dot inactive"></span><span>No Active Session</span>';
+
+          showNotification("Session ended successfully", "success");
+
+          // Stop camera automatically
+          stopCamera();
+        } catch (error) {
+          console.error("Error ending session:", error);
+          showNotification("Error ending session", "error");
+        }
+      }
+
+      async function loadCurrentSession() {
+        try {
+          const snapshot = await db.collection('sessions')
+            .where('teacherId', '==', auth.currentUser.uid)
+            .where('status', '==', 'active')
+            .limit(1)
+            .get();
+
+          if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            currentSession = { id: doc.id, ...doc.data() };
+
+            document.getElementById("startSessionBtn").disabled = true;
+            document.getElementById("endSessionBtn").disabled = false;
+            document.getElementById("sessionStatus").innerHTML =
+              '<span class="status-dot active"></span><span>Session Active</span>';
+
+            // Automatically start camera if session is active
+            await startCamera();
+          }
+
+          loadAttendanceStats();
+        } catch (error) {
+          console.error("Error loading session:", error);
+        }
+      }
+
+      async function startCamera() {
+        try {
+          video = document.getElementById('video');
+          canvas = document.getElementById('canvas');
+          ctx = canvas.getContext('2d');
+
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+              width: 640, 
+              height: 480,
+              facingMode: 'user'
+            } 
+          });
+          
+          video.srcObject = stream;
+          video.play();
+
+          document.getElementById("startCameraBtn").disabled = true;
+          document.getElementById("stopCameraBtn").disabled = false;
+
+          // Start face detection
+          if (modelsLoaded) {
+            startFaceDetection();
+          }
+
+          showNotification("Camera started successfully", "success");
+        } catch (error) {
+          console.error("Error starting camera:", error);
+          showNotification("Error starting camera. Please allow camera access.", "error");
+        }
+      }
+
+      function stopCamera() {
+        if (video && video.srcObject) {
+          const tracks = video.srcObject.getTracks();
+          tracks.forEach(track => track.stop());
+          video.srcObject = null;
+        }
+
+        if (detectionInterval) {
+          clearInterval(detectionInterval);
+          detectionInterval = null;
+        }
+
+        isDetecting = false;
+        document.getElementById("startCameraBtn").disabled = false;
+        document.getElementById("stopCameraBtn").disabled = true;
+
+        showNotification("Camera stopped", "info");
+      }
+
+      function startFaceDetection() {
+        if (isDetecting) return;
+        
+        isDetecting = true;
+        detectionInterval = setInterval(async () => {
+          if (!video || !modelsLoaded || !currentSession) return;
+
+          try {
+            const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+              .withFaceLandmarks()
+              .withFaceDescriptors();
+
+            if (detections.length > 0) {
+              // Face detected - mark attendance
+              await markAttendance(detections[0]);
+            }
+          } catch (error) {
+            console.error("Face detection error:", error);
+          }
+        }, 2000); // Check every 2 seconds
+      }
+
+      async function markAttendance(faceDetection) {
+        try {
+          // Capture face image
+          const box = faceDetection.detection.box;
+          const faceCanvas = document.createElement('canvas');
+          const faceCtx = faceCanvas.getContext('2d');
+          faceCanvas.width = box.width;
+          faceCanvas.height = box.height;
+          faceCtx.drawImage(video, box.x, box.y, box.width, box.height, 0, 0, box.width, box.height);
+
+          // Convert to blob
+          const blob = await new Promise(resolve => faceCanvas.toBlob(resolve, 'image/jpeg', 0.9));
+
+          // Create form data
+          const formData = new FormData();
+          formData.append('code', currentSession.code);
+          formData.append('file', blob, 'face.jpg');
+
+          // Call backend API
+          const response = await fetch('http://localhost:8000/face/auto-identify-and-mark', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Failed to mark attendance');
+          }
+
+          const result = await response.json();
+          const studentId = `User ${result.user_id}`; // Assuming user_id is numeric
+
+          // Update attendance list
+          addToAttendanceList(studentId, new Date());
+          showNotification(`Student ${studentId} marked present! Similarity: ${(result.similarity * 100).toFixed(1)}%`, "success");
+
+          // Update stats
+          loadAttendanceStats();
+        } catch (error) {
+          console.error("Error marking attendance:", error);
+          showNotification("Error marking attendance: " + error.message, "error");
+        }
+      }
+
+      function generateStudentId(faceDescriptor) {
+        // Generate a consistent student ID based on face features
+        const hash = faceDescriptor.slice(0, 10).reduce((acc, val) => acc + Math.abs(val), 0);
+        return `STU${Math.floor(hash % 10000).toString().padStart(4, '0')}`;
+      }
+
+      function addToAttendanceList(studentId, timestamp) {
+        const attendanceList = document.getElementById('attendanceList');
+        const noData = attendanceList.querySelector('.no-data');
+        
+        if (noData) {
+          noData.remove();
+        }
+
+        const attendanceItem = document.createElement('div');
+        attendanceItem.className = 'attendance-item';
+        attendanceItem.innerHTML = `
+          <div class="student-info">
+            <strong>${studentId}</strong>
+            <span class="timestamp">${timestamp.toLocaleTimeString()}</span>
+          </div>
+          <span class="status present">Present</span>
+        `;
+
+        attendanceList.insertBefore(attendanceItem, attendanceList.firstChild);
+
+        // Keep only last 10 items
+        const items = attendanceList.querySelectorAll('.attendance-item');
+        if (items.length > 10) {
+          items[items.length - 1].remove();
+        }
+      }
+
+      async function loadAttendanceStats() {
+        if (!currentSession) return;
+
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const attendanceSnapshot = await db.collection('attendance')
+            .where('sessionId', '==', currentSession.id)
+            .where('date', '==', today)
+            .get();
+
+          const presentStudents = attendanceSnapshot.size;
+          const totalStudents = 50; // This could be loaded from a students collection
+          const attendanceRate = totalStudents > 0 ? Math.round((presentStudents / totalStudents) * 100) : 0;
+
+          document.getElementById('totalStudents').textContent = totalStudents;
+          document.getElementById('presentStudents').textContent = presentStudents;
+          document.getElementById('attendanceRate').textContent = `${attendanceRate}%`;
+        } catch (error) {
+          console.error("Error loading attendance stats:", error);
+        }
+      }
+
+      function showNotification(message, type = 'info') {
+        const notification = document.getElementById('notification');
+        const notificationText = document.getElementById('notificationText');
+        
+        notificationText.textContent = message;
+        notification.className = `notification ${type}`;
+        notification.classList.remove('hidden');
+
+        setTimeout(() => {
+          notification.classList.add('hidden');
+        }, 3000);
+      }
+
+      function logout() {
+        auth.signOut().then(() => {
+          localStorage.clear();
+          location.href = "login.html";
+        });
+      }
+
+      // Cleanup on page unload
+      window.addEventListener('beforeunload', () => {
+        stopCamera();
+      });
+    </script>
+  </body>
+</html>
