@@ -31,3 +31,33 @@ class Attendance(SQLModel, table=True):
 
     session: Optional[AttendanceSession] = Relationship()
     user: Optional[User] = Relationship()
+
+class Chapter(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    teacher_id: str = Field(foreign_key="user.id")
+    pdf_path: str
+    resources: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    teacher: Optional[User] = Relationship()
+
+class ChapterPlan(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    chapter_id: int = Field(foreign_key="chapter.id")
+    teacher_id: str = Field(foreign_key="user.id")
+    total_lectures: int
+    minutes_per_lecture: int
+    topics_json: Optional[str] = Field(default=None)
+    start_date: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class TeachingSchedule(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    chapter_id: int = Field(foreign_key="chapter.id")
+    teacher_id: str = Field(foreign_key="user.id")
+    lecture_number: int
+    date: datetime
+    topic: str
+    is_taught: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

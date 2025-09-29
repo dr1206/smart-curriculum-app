@@ -7,7 +7,10 @@ import asyncio
 from app.db import create_db_and_tables
 from app.routers.face import router as face_router
 from app.routers.session import router as session_router
+from app.routers.timetable import router as timetable_router
+from app.routers.curriculum import router as curriculum_router
 from app.notifications import websocket_handler
+from fastapi.staticfiles import StaticFiles
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,10 +34,25 @@ app.add_middleware(
 # Include routers
 app.include_router(face_router)
 app.include_router(session_router)
+app.include_router(timetable_router)
+app.include_router(curriculum_router)
+
+# Serve static files
+app.mount("/public", StaticFiles(directory="public"), name="public")
 
 @app.get("/")
 def read_root():
     return {"message": "Attendance System API"}
+
+@app.get("/code/time.py")
+def get_time_code():
+    try:
+        with open("time.py", "r", encoding="utf-8", errors="replace") as f:
+            content = f.read()
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(content)
+    except FileNotFoundError:
+        return {"error": "File not found"}
 
 if __name__ == "__main__":
     # Start both HTTP and WebSocket servers

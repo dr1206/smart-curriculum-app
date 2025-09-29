@@ -77,20 +77,23 @@
         <h2>Study Tools</h2>
         <div class="tools-grid">
           <div class="tool-card">
-            <h3>📄 PDF Summarizer</h3>
-            <p>Summarize your PDF documents</p>
-            <button onclick="openSummarizer()" class="tool-btn">Open Summarizer</button>
-          </div>
-          <div class="tool-card">
-            <h3>🧠 Quiz Generator</h3>
-            <p>Generate quizzes from PDFs</p>
-            <button onclick="toggleQuiz()" class="tool-btn">Generate Quiz</button>
+            <h3>📄 PDF Study Assistant</h3>
+            <p>Summarize PDFs, generate flashcards, quizzes, and ask voice-enabled questions</p>
+            <button onclick="openStudyAssistant()" class="tool-btn">Open Study Assistant</button>
           </div>
           <div class="tool-card">
             <h3>🍅 Timetable Generator</h3>
             <p>Create optimized study schedules</p>
             <button onclick="openTimetable()" class="tool-btn">Generate Timetable</button>
           </div>
+        </div>
+      </div>
+
+      <div class="chapters-section">
+        <div class="tool-card" onclick="openChapters()">
+          <h3>📚 Chapters</h3>
+          <p>Access chapter materials and resources</p>
+          <button class="tool-btn">View Chapters</button>
         </div>
       </div>
 
@@ -250,16 +253,16 @@
         });
       }
 
-      function openSummarizer() {
+      function openStudyAssistant() {
         window.open('http://localhost:8501', '_blank');
       }
 
-      function toggleQuiz() {
-        window.open('quiz.html', '_blank');
+      function openTimetable() {
+        window.open('http://localhost:8000/code/time.py', '_blank');
       }
 
-      function openTimetable() {
-        window.open('http://localhost:8502', '_blank');
+      function openChapters() {
+        window.location.href = 'chapters.html';
       }
 
       async function startCamera() {
@@ -322,6 +325,73 @@
         const rate = ((attended / total) * 100).toFixed(2);
         document.getElementById('calcResult').textContent = `Attendance Rate: ${rate}%`;
       }
+
+      async function loadChapters() {
+        try {
+          const response = await fetch('http://localhost:8000/curriculum/chapters');
+          if (!response.ok) {
+            throw new Error('Failed to fetch chapters');
+          }
+          const chapters = await response.json();
+
+          const chaptersList = document.getElementById('chaptersList');
+          chaptersList.innerHTML = '';
+
+          if (chapters.length > 0) {
+            chapters.forEach(chapter => {
+              const chapterItem = document.createElement('div');
+              chapterItem.className = 'tool-card';
+              chapterItem.innerHTML = `
+                <h3>📚 ${chapter.name}</h3>
+                <p>Access chapter materials and resources</p>
+                <div class="chapter-actions">
+                  <button onclick="downloadPDF(${chapter.id})" class="tool-btn">📥 Download PDF</button>
+                  <button onclick="getResources(${chapter.id})" class="tool-btn">📚 Get Resources</button>
+                </div>
+                <div id="resources-${chapter.id}" class="resources-display" style="display: none;"></div>
+              `;
+              chaptersList.appendChild(chapterItem);
+            });
+          } else {
+            chaptersList.innerHTML = '<p class="no-data">No chapters available</p>';
+          }
+        } catch (error) {
+          console.error("Error loading chapters:", error);
+          showNotification("Error loading chapters", "error");
+        }
+      }
+
+      function downloadPDF(chapterId) {
+        window.open(`http://localhost:8000/curriculum/chapter/${chapterId}/pdf`, '_blank');
+      }
+
+      async function getResources(chapterId) {
+        const resourcesDiv = document.getElementById(`resources-${chapterId}`);
+        if (resourcesDiv.style.display === 'block') {
+          resourcesDiv.style.display = 'none';
+          return;
+        }
+
+        try {
+          const response = await fetch(`http://localhost:8000/curriculum/chapter/${chapterId}/resources`);
+          if (!response.ok) {
+            throw new Error('Failed to fetch resources');
+          }
+          const data = await response.json();
+          resourcesDiv.textContent = data.resources;
+          resourcesDiv.style.display = 'block';
+        } catch (error) {
+          console.error("Error fetching resources:", error);
+          showNotification("Error fetching resources", "error");
+        }
+      }
+
+      // Load chapters on page load
+      auth.onAuthStateChanged(user => {
+        if (user && localStorage.getItem("role") === "student") {
+          loadChapters();
+        }
+      });
     </script>
   </body>
 </html>

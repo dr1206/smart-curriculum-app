@@ -13,12 +13,11 @@
   </head>
   <body>
     <div class="login-container">
-      <h1 id="pageTitle">Login to Attendance System</h1>
-      <div id="formToggle">
-        <button type="button" id="loginTab" class="tab-btn active">Login</button>
-        <button type="button" id="registerTab" class="tab-btn">Register</button>
+      <div class="back-button">
+        <button type="button" onclick="goBackToRoleSelection()" class="back-btn">← Back to Role Selection</button>
       </div>
-      
+      <h1 id="pageTitle"></h1>
+
       <form id="loginForm">
         <div class="form-group">
           <label for="email">Email:</label>
@@ -29,33 +28,6 @@
           <input type="password" id="password" required />
         </div>
         <button type="submit" class="btn">Login</button>
-      </form>
-
-      <form id="registerForm" style="display: none;">
-        <div class="form-group">
-          <label for="regEmail">Email:</label>
-          <input type="email" id="regEmail" required />
-        </div>
-        <div class="form-group">
-          <label for="regPassword">Password:</label>
-          <input type="password" id="regPassword" minlength="6" required />
-        </div>
-        <div class="form-group">
-          <label for="confirmPassword">Confirm Password:</label>
-          <input type="password" id="confirmPassword" minlength="6" required />
-        </div>
-        <div class="form-group">
-          <label>Role:</label>
-          <div class="role-selection">
-            <label>
-              <input type="radio" name="regRole" value="student" required /> Student
-            </label>
-            <label>
-              <input type="radio" name="regRole" value="teacher" required /> Teacher
-            </label>
-          </div>
-        </div>
-        <button type="submit" class="btn">Register</button>
       </form>
     </div>
 
@@ -81,29 +53,21 @@
       const db = firebase.firestore();
 
       const loginForm = document.getElementById('loginForm');
-      const registerForm = document.getElementById('registerForm');
-      const loginTab = document.getElementById('loginTab');
-      const registerTab = document.getElementById('registerTab');
       const pageTitle = document.getElementById('pageTitle');
       const notification = document.getElementById('notification');
       const notificationText = document.getElementById('notificationText');
 
-      // Tab switching
-      loginTab.addEventListener('click', () => {
-        loginForm.style.display = 'block';
-        registerForm.style.display = 'none';
-        loginTab.classList.add('active');
-        registerTab.classList.remove('active');
+      // Set title based on selected role
+      const selectedRole = localStorage.getItem('selectedRole');
+      if (selectedRole === 'student') {
+        pageTitle.textContent = 'Student Login';
+      } else if (selectedRole === 'teacher') {
+        pageTitle.textContent = 'Teacher Login';
+      } else {
         pageTitle.textContent = 'Login to Attendance System';
-      });
+      }
 
-      registerTab.addEventListener('click', () => {
-        loginForm.style.display = 'none';
-        registerForm.style.display = 'block';
-        loginTab.classList.remove('active');
-        registerTab.classList.add('active');
-        pageTitle.textContent = 'Register for Attendance System';
-      });
+
 
       // Login
       loginForm.addEventListener('submit', async (e) => {
@@ -152,64 +116,7 @@
         }
       });
 
-      // Registration
-      registerForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        console.log('Registration form submitted');
 
-        const email = document.getElementById('regEmail').value.trim();
-        const password = document.getElementById('regPassword').value;
-        const confirmPassword = document.getElementById('confirmPassword').value;
-        const role = document.querySelector('input[name="regRole"]:checked').value;
-
-        console.log('Form values:', { email, password: '***', confirmPassword: '***', role });
-
-        if (password !== confirmPassword) {
-          console.log('Passwords do not match');
-          showNotification('Passwords do not match', 'error');
-          return;
-        }
-
-        if (password.length < 6) {
-          console.log('Password too short');
-          showNotification('Password must be at least 6 characters', 'error');
-          return;
-        }
-
-        try {
-          console.log('Creating user...');
-          // Create user
-          const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-          const user = userCredential.user;
-          console.log('User created:', user.uid);
-
-          // Store role in localStorage
-          localStorage.setItem('role', role);
-
-          // Store user details in Firestore
-          console.log('Saving to Firestore...');
-          await db.collection('users').doc(user.uid).set({
-            email: user.email,
-            role: role,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          console.log('Saved to Firestore');
-
-          showNotification('Registration successful! Redirecting...', 'success');
-
-          // Redirect based on role
-          setTimeout(() => {
-            if (role === 'teacher') {
-              window.location.href = 'teacher.html';
-            } else if (role === 'student') {
-              window.location.href = 'student.html';
-            }
-          }, 1500);
-        } catch (error) {
-          console.error('Registration error:', error);
-          showNotification('Registration failed: ' + error.message, 'error');
-        }
-      });
 
       function showNotification(message, type = 'info') {
         notificationText.textContent = message;
@@ -219,6 +126,12 @@
           notification.classList.add('hidden');
         }, 3000);
       }
+
+      function goBackToRoleSelection() {
+        window.location.href = '../index.html';
+      }
+
+
 
       // Check if already logged in
       auth.onAuthStateChanged(async (user) => {

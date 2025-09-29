@@ -72,6 +72,43 @@
         </div>
       </div>
 
+      <div class="curriculum-section">
+        <h2>Curriculum Management</h2>
+        <div class="upload-form">
+          <label for="chapterName">Chapter Name:</label>
+          <input type="text" id="chapterName" placeholder="Enter chapter name" />
+          <label for="pdfFile">Upload PDF:</label>
+          <input type="file" id="pdfFile" accept=".pdf" />
+          <button onclick="uploadPDF()" class="primary-btn">Upload PDF</button>
+        </div>
+        <div class="upload-form" style="margin-top:16px;">
+          <h3>Plan Chapter & Generate Schedule</h3>
+          <div class="row">
+            <div class="col">
+              <label for="planChapterSelect">Select Chapter:</label>
+              <select id="planChapterSelect"></select>
+            </div>
+            <div class="col">
+              <label for="totalLectures">Total Lectures:</label>
+              <input type="number" id="totalLectures" min="1" placeholder="e.g., 8" />
+            </div>
+            <div class="col">
+              <label for="minutesPerLecture">Minutes per Lecture:</label>
+              <input type="number" id="minutesPerLecture" min="10" step="5" placeholder="e.g., 45" />
+            </div>
+          </div>
+          <label for="topics">Topics (comma-separated, optional):</label>
+          <input type="text" id="topics" placeholder="Intro, Basics, Examples, ..." />
+          <label for="startDate">Start Date:</label>
+          <input type="date" id="startDate" />
+          <div class="row" style="margin-top:8px;">
+            <button onclick="savePlan()" class="secondary-btn">Save Plan</button>
+            <button onclick="generateSchedule()" class="primary-btn">Generate Schedule</button>
+          </div>
+          <div id="scheduleContainer" style="margin-top:12px;"></div>
+        </div>
+      </div>
+
       <div class="session-stats">
         <h2>Session Statistics</h2>
         <div class="stats-grid">
@@ -137,6 +174,7 @@
         document.getElementById("userEmail").textContent = user.email;
         loadCurrentSession();
         loadModels();
+        loadTeacherChapters();
       });
 
       async function loadModels() {
@@ -439,6 +477,181 @@
         setTimeout(() => {
           notification.classList.add('hidden');
         }, 3000);
+      }
+
+      async function uploadPDF() {
+        const chapterName = document.getElementById('chapterName').value.trim();
+        const pdfFile = document.getElementById('pdfFile').files[0];
+
+        if (!chapterName || !pdfFile) {
+          showNotification("Please enter chapter name and select a PDF file", "error");
+          return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', pdfFile);
+        formData.append('chapter_name', chapterName);
+        formData.append('teacher_id', auth.currentUser.uid);
+
+        try {
+          const response = await fetch('http://localhost:8000/curriculum/upload-pdf', {
+            method: 'POST',
+            body: formData
+          });
+
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || 'Upload failed');
+          }
+
+          const result = await response.json();
+          showNotification("PDF uploaded successfully", "success");
+          document.getElementById('chapterName').value = '';
+          document.getElementById('pdfFile').value = '';
+          await loadTeacherChapters();
+        } catch (error) {
+          console.error("Error uploading PDF:", error);
+          showNotification("Error uploading PDF: " + error.message, "error");
+        }
+      }
+
+      async function loadTeacherChapters() {
+        try {
+          const response = await fetch('http://localhost:8000/curriculum/chapters');
+          if (!response.ok) return;
+          const chapters = await response.json();
+          const sel = document.getElementById('planChapterSelect');
+          if (!sel) return;
+          sel.innerHTML = '';
+          const teacherId = auth.currentUser.uid;
+          const mine = chapters.filter(c => c.teacher_id === teacherId);
+          if (mine.length === 0) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No chapters found';
+            sel.appendChild(opt);
+            return;
+          }
+          mine.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.id;
+            opt.textContent = c.name;
+            sel.appendChild(opt);
+          });
+          await loadSchedule();
+        } catch (e) {
+          console.error('loadTeacherChapters error', e);
+        }
+      }
+
+      async function savePlan() {
+        const chapterId = document.getElementById('planChapterSelect').value;
+        const totalLectures = parseInt(document.getElementById('totalLectures').value || '0', 10);
+        const minutesPerLecture = parseInt(document.getElementById('minutesPerLecture').value || '0', 10);
+        const topicsStr = document.getElementById('topics').value.trim();
+        const startDate = document.getElementById('startDate').value;
+        if (!chapterId || !totalLectures || !minutesPerLecture) {
+          showNotification('Please select chapter and enter lectures/time', 'error');
+          return;
+        }
+        const payload = {
+          chapter_id: parseInt(chapterId, 10),
+          teacher_id: auth.currentUser.uid,
+          total_lectures: totalLectures,
+          minutes_per_lecture: minutesPerLecture,
+          topics: topicsStr ? topicsStr.split(',').map(s => s.trim()).filter(Boolean) : null,
+          start_date: startDate || null
+        };
+        try {
+          const res = await fetch('http://localhost:8000/timetable/plan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (!res.ok) throw new Error('Plan save failed');
+          showNotification('Plan saved', 'success');
+        } catch (e) {
+          console.error(e);
+          showNotification('Error saving plan', 'error');
+        }
+      }
+
+      async function generateSchedule() {
+        const chapterId = document.getElementById('planChapterSelect').value;
+        const startDate = document.getElementById('startDate').value;
+        if (!chapterId || !startDate) {
+          showNotification('Please select chapter and start date', 'error');
+          return;
+        }
+        try {
+          const res = await fetch('http://localhost:8000/timetable/schedule/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chapter_id: parseInt(chapterId, 10), teacher_id: auth.currentUser.uid, start_date: startDate })
+          });
+          if (!res.ok) {
+            let message = 'Schedule generation failed';
+            try {
+              const err = await res.json();
+              if (err && err.detail) message = err.detail;
+            } catch (_) {}
+            throw new Error(message);
+          }
+          showNotification('Schedule generated', 'success');
+          await loadSchedule();
+        } catch (e) {
+          console.error(e);
+          showNotification('Error generating schedule: ' + e.message, 'error');
+        }
+      }
+
+      async function loadSchedule() {
+        const sel = document.getElementById('planChapterSelect');
+        if (!sel) return;
+        const chapterId = sel.value;
+        if (!chapterId) return;
+        try {
+          const res = await fetch(`http://localhost:8000/timetable/schedule/${auth.currentUser.uid}/${parseInt(chapterId, 10)}`);
+          if (!res.ok) throw new Error('Load schedule failed');
+          const rows = await res.json();
+          const container = document.getElementById('scheduleContainer');
+          if (!container) return;
+          if (!rows.length) {
+            container.innerHTML = '<p class="no-data">No schedule yet</p>';
+            return;
+          }
+          container.innerHTML = '';
+          rows.forEach(r => {
+            const div = document.createElement('div');
+            div.className = 'attendance-item';
+            div.innerHTML = `
+              <div class="student-info">
+                <strong>Lecture ${r.lecture_number} - ${r.date}</strong>
+                <span>${r.topic}</span>
+              </div>
+              <span class="status ${r.is_taught ? 'present' : 'absent'}">${r.is_taught ? 'Taught' : 'Pending'}</span>
+              <button class="secondary-btn" onclick="toggleTaught(${r.id}, ${r.is_taught ? 'false' : 'true'})">${r.is_taught ? 'Mark Untaught' : 'Mark Taught'}</button>
+            `;
+            container.appendChild(div);
+          });
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      async function toggleTaught(id, toState) {
+        try {
+          const res = await fetch('http://localhost:8000/timetable/schedule/mark-taught', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ schedule_id: id, is_taught: toState })
+          });
+          if (!res.ok) throw new Error('Update failed');
+          await loadSchedule();
+        } catch (e) {
+          console.error(e);
+          showNotification('Error updating', 'error');
+        }
       }
 
       function logout() {

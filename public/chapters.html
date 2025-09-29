@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chapters - Student Portal</title>
+    <link rel="stylesheet" href="styles.css" />
+
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <button onclick="goBack()" class="back-btn">← Back to Dashboard</button>
+        <h1>📚 Chapters</h1>
+        <div class="user-info">
+          <span id="userEmail"></span>
+          <button onclick="logout()" class="logout-btn">Logout</button>
+        </div>
+      </div>
+
+      <div class="chapters-section">
+        <div id="chaptersList" class="chapters-grid">
+          <p class="no-data">Loading chapters...</p>
+        </div>
+      </div>
+      <div id="scheduleView" style="margin-top:16px;"></div>
+    </div>
+
+    <div id="notification" class="notification hidden">
+      <span id="notificationText"></span>
+    </div>
+
+    <script>
+      // Firebase config
+      const firebaseConfig = {
+        apiKey: "AIzaSyBI9FWOhqfS6e1aHpC_guvx1r_zy14cobk",
+        authDomain: "attendance-system-a1ac4.firebaseapp.com",
+        projectId: "attendance-system-a1ac4",
+        storageBucket: "attendance-system-a1ac4.firebasestorage.app",
+        messagingSenderId: "462766302633",
+        appId: "1:462766302633:web:b45441d758dc007c4250b8",
+        measurementId: "G-2MMSHHN4CK"
+      };
+
+      // Initialize Firebase
+      if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+      const auth = firebase.auth();
+      const db = firebase.firestore();
+
+      // Check authentication
+      auth.onAuthStateChanged(user => {
+        if (!user) {
+          window.location.href = "login.html";
+          return;
+        }
+
+        const role = localStorage.getItem("role");
+        if (role !== "student") {
+          alert("Access denied. Student role required.");
+          window.location.href = "login.html";
+          return;
+        }
+
+        document.getElementById("userEmail").textContent = user.email;
+        loadChapters();
+      });
+
+      function showNotification(message, type = 'info') {
+        const notification = document.getElementById('notification');
+        const notificationText = document.getElementById('notificationText');
+
+        notificationText.textContent = message;
+        notification.className = `notification ${type}`;
+        notification.classList.remove('hidden');
+
+        setTimeout(() => {
+          notification.classList.add('hidden');
+        }, 3000);
+      }
+
+      function logout() {
+        auth.signOut().then(() => {
+          localStorage.clear();
+          window.location.href = "login.html";
+        });
+      }
+
+      function goBack() {
+        window.location.href = 'student.html';
+      }
+
+      async function loadChapters() {
+        try {
+          const response = await fetch('http://localhost:8000/curriculum/chapters');
+          if (!response.ok) {
+            throw new Error('Failed to fetch chapters');
+          }
+          const chapters = await response.json();
+
+          const chaptersList = document.getElementById('chaptersList');
+          chaptersList.innerHTML = '';
+
+          if (chapters.length > 0) {
+            chapters.forEach(chapter => {
+              const chapterItem = document.createElement('div');
+              chapterItem.className = 'tool-card';
+              chapterItem.innerHTML = `
+                <h3>📚 ${chapter.name}</h3>
+                <p>Access chapter materials and resources</p>
+                <div class="chapter-actions">
+                  <button onclick="downloadPDF(${chapter.id})" class="tool-btn">📥 Download PDF</button>
+                  <button onclick="getResources(${chapter.id})" class="tool-btn">📚 Get Resources</button>
+                  <button onclick="viewSchedule(${chapter.id}, '${chapter.teacher_id}')" class="tool-btn">🗓 View Schedule</button>
+                </div>
+                <div id="resources-${chapter.id}" class="resources-display" style="display: none;"></div>
+              `;
+              chaptersList.appendChild(chapterItem);
+            });
+          } else {
+            chaptersList.innerHTML = '<p class="no-data">No chapters available</p>';
+          }
+        } catch (error) {
+          console.error("Error loading chapters:", error);
+          showNotification("Error loading chapters", "error");
+        }
+      }
+
+      function downloadPDF(chapterId) {
+        window.open(`http://localhost:8000/curriculum/chapter/${chapterId}/pdf`, '_blank');
+      }
+
+      async function getResources(chapterId) {
+        const resourcesDiv = document.getElementById(`resources-${chapterId}`);
+        if (resourcesDiv.style.display === 'block') {
+          resourcesDiv.style.display = 'none';
+          return;
+        }
+
+        try {
+          const response = await fetch(`http://localhost:8000/curriculum/chapter/${chapterId}/resources`);
+          if (!response.ok) {
+            throw new Error('Failed to fetch resources');
+          }
+          const data = await response.json();
+          resourcesDiv.textContent = data.resources;
+          resourcesDiv.style.display = 'block';
+        } catch (error) {
+          console.error("Error fetching resources:", error);
+          showNotification("Error fetching resources", "error");
+        }
+      }
+
+      async function viewSchedule(chapterId, teacherId) {
+        try {
+          const res = await fetch(`http://localhost:8000/timetable/schedule/${teacherId}/${chapterId}`);
+          if (!res.ok) throw new Error('Failed to load schedule');
+          const rows = await res.json();
+          const container = document.getElementById('scheduleView');
+          if (!rows.length) {
+            container.innerHTML = '<p class="no-data">No schedule available</p>';
+            return;
+          }
+          container.innerHTML = '';
+          rows.forEach(r => {
+            const div = document.createElement('div');
+            div.className = 'attendance-item';
+            div.innerHTML = `
+              <div class="student-info">
+                <strong>Lecture ${r.lecture_number} - ${r.date}</strong>
+                <span>${r.topic}</span>
+              </div>
+              <span class="status ${r.is_taught ? 'present' : 'absent'}">${r.is_taught ? 'Taught' : 'Planned'}</span>
+            `;
+            container.appendChild(div);
+          });
+          container.scrollIntoView({ behavior: 'smooth' });
+        } catch (e) {
+          console.error(e);
+          showNotification('Error loading schedule', 'error');
+        }
+      }
+    </script>
+  </body>
+</html>
